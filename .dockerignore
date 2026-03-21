@@ -1,0 +1,5 @@
+node_modules
+todos.db
+*.env
+.env*
+generate-icons.js

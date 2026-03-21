@@ -12,7 +12,7 @@ function fileHash(filePath) {
 }
 
 const app = express();
-const db = new sqlite3.Database('todos.db');
+const db = new sqlite3.Database(process.env.DB_PATH || 'todos.db');
 
 db.serialize(() => {
   db.run(`
