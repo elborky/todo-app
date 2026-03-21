@@ -58,6 +58,21 @@ app.patch('/api/todos/:id', (req, res) => {
   });
 });
 
+// Edit todo text
+app.put('/api/todos/:id', (req, res) => {
+  const { text } = req.body;
+  if (!text || !text.trim()) return res.status(400).json({ error: 'Text is required' });
+  const { id } = req.params;
+  db.run('UPDATE todos SET text = ? WHERE id = ?', [text.trim(), id], function (err) {
+    if (err) return res.status(500).json({ error: err.message });
+    if (this.changes === 0) return res.status(404).json({ error: 'Not found' });
+    db.get('SELECT * FROM todos WHERE id = ?', [id], (err, row) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json(toTodo(row));
+    });
+  });
+});
+
 // Delete todo
 app.delete('/api/todos/:id', (req, res) => {
   db.run('DELETE FROM todos WHERE id = ?', [req.params.id], function (err) {

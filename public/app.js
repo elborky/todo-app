@@ -35,6 +35,19 @@ async function toggleTodo(id) {
   }
 }
 
+async function editTodo(id, text) {
+  const res = await fetch(`/api/todos/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text })
+  });
+  if (res.ok) {
+    const updated = await res.json();
+    todos = todos.map(t => t.id === id ? updated : t);
+    render();
+  }
+}
+
 async function deleteTodo(id) {
   const res = await fetch(`/api/todos/${id}`, { method: 'DELETE' });
   if (res.ok) {
@@ -60,10 +73,51 @@ function render() {
     li.innerHTML = `
       <div class="todo-checkbox" role="checkbox" aria-checked="${todo.completed}" title="Toggle complete"></div>
       <span class="todo-text">${escapeHtml(todo.text)}</span>
+      <input class="edit-input hidden" type="text" maxlength="200" value="${escapeHtml(todo.text)}">
+      <button class="edit-btn" title="Edit">&#x270E;</button>
       <button class="delete-btn" title="Delete">&#x2715;</button>
     `;
+
     li.querySelector('.todo-checkbox').addEventListener('click', () => toggleTodo(todo.id));
     li.querySelector('.delete-btn').addEventListener('click', () => deleteTodo(todo.id));
+
+    const editBtn = li.querySelector('.edit-btn');
+    const editInput = li.querySelector('.edit-input');
+    const textSpan = li.querySelector('.todo-text');
+
+    editBtn.addEventListener('click', () => {
+      const isEditing = !editInput.classList.contains('hidden');
+      if (isEditing) {
+        const newText = editInput.value.trim();
+        if (newText && newText !== todo.text) {
+          editTodo(todo.id, newText);
+        } else {
+          editInput.classList.add('hidden');
+          textSpan.classList.remove('hidden');
+          editBtn.innerHTML = '&#x270E;';
+          editBtn.title = 'Edit';
+        }
+      } else {
+        editInput.classList.remove('hidden');
+        textSpan.classList.add('hidden');
+        editBtn.innerHTML = '&#x2713;';
+        editBtn.title = 'Save';
+        editInput.focus();
+        editInput.select();
+      }
+    });
+
+    editInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') editBtn.click();
+      if (e.key === 'Escape') {
+        editInput.value = todo.text;
+        editInput.classList.add('hidden');
+        textSpan.classList.remove('hidden');
+        editBtn.innerHTML = '&#x270E;';
+        editBtn.title = 'Edit';
+      }
+    });
+
     list.appendChild(li);
   });
 
