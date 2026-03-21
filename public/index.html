@@ -9,9 +9,24 @@
 <body>
   <div class="container">
     <header>
-      <h1>My Todos</h1>
+      <div class="header-top">
+        <h1>My Todos</h1>
+        <button id="ai-suggest-btn" class="ai-btn hidden" title="Get AI priority suggestions">✨ AI Suggest</button>
+      </div>
       <p class="subtitle" id="count">0 tasks</p>
     </header>
+
+    <div id="ai-modal" class="ai-modal hidden">
+      <div class="ai-modal-content">
+        <div class="ai-modal-header">
+          <span class="ai-modal-title">✨ AI Priority Suggestion</span>
+          <button id="ai-modal-close" class="ai-modal-close">&#x2715;</button>
+        </div>
+        <div id="ai-modal-body" class="ai-modal-body">
+          <div class="ai-loading">Analyzing your todos...</div>
+        </div>
+      </div>
+    </div>
 
     <form id="todo-form">
       <div class="input-group">

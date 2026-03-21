@@ -1,6 +1,15 @@
+require('dotenv').config();
 const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
+const Anthropic = require('@anthropic-ai/sdk');
+
+function fileHash(filePath) {
+  const content = fs.readFileSync(filePath);
+  return crypto.createHash('md5').update(content).digest('hex').slice(0, 8);
+}
 
 const app = express();
 const db = new sqlite3.Database('todos.db');
@@ -17,6 +26,17 @@ db.serialize(() => {
 });
 
 app.use(express.json());
+
+app.get('/', (req, res) => {
+  const cssHash = fileHash(path.join(__dirname, 'public', 'style.css'));
+  const jsHash = fileHash(path.join(__dirname, 'public', 'app.js'));
+  let html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
+  html = html
+    .replace('href="style.css"', `href="style.css?v=${cssHash}"`)
+    .replace('src="app.js"', `src="app.js?v=${jsHash}"`);
+  res.send(html);
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 const toTodo = row => row ? { ...row, completed: Boolean(row.completed) } : null;
@@ -79,6 +99,32 @@ app.delete('/api/todos/:id', (req, res) => {
     if (err) return res.status(500).json({ error: err.message });
     if (this.changes === 0) return res.status(404).json({ error: 'Not found' });
     res.status(204).end();
+  });
+});
+
+// AI suggest priorities
+app.post('/api/ai-suggest', (req, res) => {
+  db.all('SELECT * FROM todos ORDER BY created_at DESC', async (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (rows.length === 0) return res.status(400).json({ error: 'No todos to analyze' });
+
+    const todoList = rows.map((t, i) =>
+      `${i + 1}. [${t.completed ? 'DONE' : 'TODO'}] ${t.text}`
+    ).join('\n');
+
+    const prompt = `Berikut adalah daftar todo saya:\n\n${todoList}\n\nAnalisa todo list ini dan berikan rekomendasi prioritas mana yang harus dikerjakan duluan. Pertimbangkan todo yang belum selesai (TODO). Berikan output dalam format:\n\n**Rekomendasi Prioritas:**\n1. (todo paling penting) - alasan singkat\n2. ...\n\n**Saran Tambahan:** (opsional, jika ada pola atau insight menarik dari todo list ini)`;
+
+    try {
+      const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+      const message = await client.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: prompt }]
+      });
+      res.json({ suggestion: message.content[0].text });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
   });
 });
 

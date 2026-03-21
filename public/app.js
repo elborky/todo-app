@@ -6,6 +6,10 @@ const input = document.getElementById('todo-input');
 const form = document.getElementById('todo-form');
 const countEl = document.getElementById('count');
 const emptyState = document.getElementById('empty-state');
+const aiBtn = document.getElementById('ai-suggest-btn');
+const aiModal = document.getElementById('ai-modal');
+const aiModalBody = document.getElementById('ai-modal-body');
+const aiModalClose = document.getElementById('ai-modal-close');
 
 async function fetchTodos() {
   const res = await fetch('/api/todos');
@@ -54,6 +58,26 @@ async function deleteTodo(id) {
     todos = todos.filter(t => t.id !== id);
     render();
   }
+}
+
+async function getAiSuggestion() {
+  aiModal.classList.remove('hidden');
+  aiModalBody.innerHTML = '<div class="ai-loading">Analyzing your todos...</div>';
+
+  try {
+    const res = await fetch('/api/ai-suggest', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Unknown error');
+    aiModalBody.innerHTML = `<div class="ai-result">${formatMarkdown(data.suggestion)}</div>`;
+  } catch (e) {
+    aiModalBody.innerHTML = `<div class="ai-error">Error: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function formatMarkdown(text) {
+  return escapeHtml(text)
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\n/g, '<br>');
 }
 
 function render() {
@@ -122,6 +146,11 @@ function render() {
   });
 
   emptyState.classList.toggle('hidden', visible.length > 0);
+  if (todos.length > 0) {
+    aiBtn.classList.remove('hidden');
+  } else {
+    aiBtn.classList.add('hidden');
+  }
 }
 
 function escapeHtml(str) {
@@ -142,5 +171,9 @@ document.querySelectorAll('.filter-btn').forEach(btn => {
     render();
   });
 });
+
+aiBtn.addEventListener('click', getAiSuggestion);
+aiModalClose.addEventListener('click', () => aiModal.classList.add('hidden'));
+aiModal.addEventListener('click', e => { if (e.target === aiModal) aiModal.classList.add('hidden'); });
 
 fetchTodos();
