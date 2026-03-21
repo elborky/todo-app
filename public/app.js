@@ -177,3 +177,9 @@ aiModalClose.addEventListener('click', () => aiModal.classList.add('hidden'));
 aiModal.addEventListener('click', e => { if (e.target === aiModal) aiModal.classList.add('hidden'); });
 
 fetchTodos();
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}

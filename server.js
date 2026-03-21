@@ -27,6 +27,12 @@ db.serialize(() => {
 
 app.use(express.json());
 
+// Service worker must not be cached — browser checks for updates
+app.get('/sw.js', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache');
+  res.sendFile(path.join(__dirname, 'public', 'sw.js'));
+});
+
 app.get('/', (req, res) => {
   const cssHash = fileHash(path.join(__dirname, 'public', 'style.css'));
   const jsHash = fileHash(path.join(__dirname, 'public', 'app.js'));
