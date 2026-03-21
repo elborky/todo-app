@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(curl -s -X POST http://localhost:3000/api/todos -H 'Content-Type: application/json' -d '{\"\"text\"\":\"\"Buy groceries\"\"}')",
+      "Bash(curl -s -X POST http://localhost:3000/api/todos -H 'Content-Type: application/json' -d '{\"\"text\"\":\"\"Build a todo app\"\"}')",
+      "Bash(curl -s http://localhost:3000/api/todos)",
+      "Bash(curl -s -X PATCH http://localhost:3000/api/todos/1)",
+      "Bash(curl -s -X DELETE http://localhost:3000/api/todos/2 -w \"Status: %{http_code}\")"
+    ]
+  }
+}
