@@ -1,6 +1,6 @@
 require('dotenv').config();
 const express = require('express');
-const sqlite3 = require('sqlite3').verbose();
+const { Pool } = require('pg');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -20,30 +20,31 @@ function fileHash(filePath) {
 }
 
 const app = express();
-const db = new sqlite3.Database(process.env.DB_PATH || 'todos.db');
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
-db.serialize(() => {
-  db.run(`
+async function initDb() {
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       username TEXT NOT NULL UNIQUE,
       password_hash TEXT NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
     )
   `);
-
-  db.run(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS todos (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       text TEXT NOT NULL,
-      completed INTEGER NOT NULL DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      completed BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
       user_id INTEGER REFERENCES users(id)
     )
   `);
+}
 
-  // Migrate existing DB: add user_id if not present (ignore error if already exists)
-  db.run(`ALTER TABLE todos ADD COLUMN user_id INTEGER REFERENCES users(id)`, () => {});
+initDb().catch(err => {
+  console.error('Failed to initialize database:', err);
+  process.exit(1);
 });
 
 app.use(express.json());
@@ -85,21 +86,16 @@ app.post('/api/register', async (req, res) => {
 
   try {
     const passwordHash = await bcrypt.hash(password, 12);
-    db.run(
-      'INSERT INTO users (username, password_hash) VALUES (?, ?)',
-      [username.trim(), passwordHash],
-      function (err) {
-        if (err) {
-          if (err.message.includes('UNIQUE constraint failed')) {
-            return res.status(409).json({ error: 'Username already taken' });
-          }
-          return res.status(500).json({ error: err.message });
-        }
-        const token = jwt.sign({ id: this.lastID, username: username.trim() }, JWT_SECRET, { expiresIn: '7d' });
-        res.status(201).json({ token, username: username.trim() });
-      }
+    const result = await pool.query(
+      'INSERT INTO users (username, password_hash) VALUES ($1, $2) RETURNING id',
+      [username.trim(), passwordHash]
     );
+    const token = jwt.sign({ id: result.rows[0].id, username: username.trim() }, JWT_SECRET, { expiresIn: '7d' });
+    res.status(201).json({ token, username: username.trim() });
   } catch (e) {
+    if (e.code === '23505') {
+      return res.status(409).json({ error: 'Username already taken' });
+    }
     res.status(500).json({ error: e.message });
   }
 });
@@ -108,84 +104,104 @@ app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ error: 'Username and password are required' });
 
-  db.get('SELECT * FROM users WHERE username = ?', [username.trim()], async (err, user) => {
-    if (err) return res.status(500).json({ error: err.message });
+  try {
+    const result = await pool.query('SELECT * FROM users WHERE username = $1', [username.trim()]);
+    const user = result.rows[0];
     if (!user) return res.status(401).json({ error: 'Invalid username or password' });
 
-    try {
-      const match = await bcrypt.compare(password, user.password_hash);
-      if (!match) return res.status(401).json({ error: 'Invalid username or password' });
-      const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
-      res.json({ token, username: user.username });
-    } catch (e) {
-      res.status(500).json({ error: e.message });
-    }
-  });
+    const match = await bcrypt.compare(password, user.password_hash);
+    if (!match) return res.status(401).json({ error: 'Invalid username or password' });
+
+    const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
+    res.json({ token, username: user.username });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ── Todo routes (all protected) ────────────────────────────────────────────────
 
-const toTodo = row => row ? { ...row, completed: Boolean(row.completed) } : null;
-
-app.get('/api/todos', authenticateToken, (req, res) => {
-  db.all('SELECT * FROM todos WHERE user_id = ? ORDER BY created_at DESC', [req.user.id], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(rows.map(toTodo));
-  });
+app.get('/api/todos', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM todos WHERE user_id = $1 ORDER BY created_at DESC',
+      [req.user.id]
+    );
+    res.json(result.rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
-app.post('/api/todos', authenticateToken, (req, res) => {
+app.post('/api/todos', authenticateToken, async (req, res) => {
   const { text } = req.body;
   if (!text || !text.trim()) return res.status(400).json({ error: 'Text is required' });
-  db.run('INSERT INTO todos (text, user_id) VALUES (?, ?)', [text.trim(), req.user.id], function (err) {
-    if (err) return res.status(500).json({ error: err.message });
-    db.get('SELECT * FROM todos WHERE id = ?', [this.lastID], (err, row) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.status(201).json(toTodo(row));
-    });
-  });
+  try {
+    const result = await pool.query(
+      'INSERT INTO todos (text, user_id) VALUES ($1, $2) RETURNING *',
+      [text.trim(), req.user.id]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
-app.patch('/api/todos/:id', authenticateToken, (req, res) => {
+app.patch('/api/todos/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
-  db.get('SELECT * FROM todos WHERE id = ? AND user_id = ?', [id, req.user.id], (err, row) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (!row) return res.status(404).json({ error: 'Not found' });
-    db.run('UPDATE todos SET completed = ? WHERE id = ?', [row.completed ? 0 : 1, id], err => {
-      if (err) return res.status(500).json({ error: err.message });
-      db.get('SELECT * FROM todos WHERE id = ?', [id], (err, updated) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(toTodo(updated));
-      });
-    });
-  });
+  try {
+    const select = await pool.query(
+      'SELECT * FROM todos WHERE id = $1 AND user_id = $2',
+      [id, req.user.id]
+    );
+    if (select.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    const row = select.rows[0];
+    const updated = await pool.query(
+      'UPDATE todos SET completed = $1 WHERE id = $2 RETURNING *',
+      [!row.completed, id]
+    );
+    res.json(updated.rows[0]);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
-app.put('/api/todos/:id', authenticateToken, (req, res) => {
+app.put('/api/todos/:id', authenticateToken, async (req, res) => {
   const { text } = req.body;
   if (!text || !text.trim()) return res.status(400).json({ error: 'Text is required' });
   const { id } = req.params;
-  db.run('UPDATE todos SET text = ? WHERE id = ? AND user_id = ?', [text.trim(), id, req.user.id], function (err) {
-    if (err) return res.status(500).json({ error: err.message });
-    if (this.changes === 0) return res.status(404).json({ error: 'Not found' });
-    db.get('SELECT * FROM todos WHERE id = ?', [id], (err, row) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json(toTodo(row));
-    });
-  });
+  try {
+    const result = await pool.query(
+      'UPDATE todos SET text = $1 WHERE id = $2 AND user_id = $3 RETURNING *',
+      [text.trim(), id, req.user.id]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Not found' });
+    res.json(result.rows[0]);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
-app.delete('/api/todos/:id', authenticateToken, (req, res) => {
-  db.run('DELETE FROM todos WHERE id = ? AND user_id = ?', [req.params.id, req.user.id], function (err) {
-    if (err) return res.status(500).json({ error: err.message });
-    if (this.changes === 0) return res.status(404).json({ error: 'Not found' });
+app.delete('/api/todos/:id', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'DELETE FROM todos WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.user.id]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Not found' });
     res.status(204).end();
-  });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
-app.post('/api/ai-suggest', authenticateToken, (req, res) => {
-  db.all('SELECT * FROM todos WHERE user_id = ? ORDER BY created_at DESC', [req.user.id], async (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
+app.post('/api/ai-suggest', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM todos WHERE user_id = $1 ORDER BY created_at DESC',
+      [req.user.id]
+    );
+    const rows = result.rows;
     if (rows.length === 0) return res.status(400).json({ error: 'No todos to analyze' });
 
     const todoList = rows.map((t, i) =>
@@ -194,18 +210,16 @@ app.post('/api/ai-suggest', authenticateToken, (req, res) => {
 
     const prompt = `Berikut adalah daftar todo saya:\n\n${todoList}\n\nAnalisa todo list ini dan berikan rekomendasi prioritas mana yang harus dikerjakan duluan. Pertimbangkan todo yang belum selesai (TODO). Berikan output dalam format:\n\n**Rekomendasi Prioritas:**\n1. (todo paling penting) - alasan singkat\n2. ...\n\n**Saran Tambahan:** (opsional, jika ada pola atau insight menarik dari todo list ini)`;
 
-    try {
-      const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-      const message = await client.messages.create({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 1024,
-        messages: [{ role: 'user', content: prompt }]
-      });
-      res.json({ suggestion: message.content[0].text });
-    } catch (e) {
-      res.status(500).json({ error: e.message });
-    }
-  });
+    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const message = await client.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1024,
+      messages: [{ role: 'user', content: prompt }]
+    });
+    res.json({ suggestion: message.content[0].text });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.listen(3000, () => console.log('Server running on http://localhost:3000'));

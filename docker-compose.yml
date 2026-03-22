@@ -1,14 +1,31 @@
 services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: todoapp
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   todo-app:
     build: .
     ports:
       - "3000:3000"
-    volumes:
-      - todo-data:/data
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - JWT_SECRET=${JWT_SECRET}
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/todoapp
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
-  todo-data:
+  postgres-data:
