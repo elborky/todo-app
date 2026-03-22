@@ -1,3 +1,127 @@
+// ── Auth helpers ───────────────────────────────────────────────────────────────
+
+function getToken() { return localStorage.getItem('token'); }
+function setToken(t) { localStorage.setItem('token', t); }
+function clearToken() { localStorage.removeItem('token'); }
+
+async function authFetch(url, options = {}) {
+  const res = await fetch(url, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getToken()}`, ...options.headers }
+  });
+  if (res.status === 401) { logout(); return res; }
+  return res;
+}
+
+// ── Auth UI ────────────────────────────────────────────────────────────────────
+
+const authView = document.getElementById('auth-view');
+const appView = document.getElementById('app-view');
+
+function showAuthView() {
+  authView.classList.remove('hidden');
+  appView.classList.add('hidden');
+}
+
+function showAppView(username) {
+  document.getElementById('username-display').textContent = username;
+  authView.classList.add('hidden');
+  appView.classList.remove('hidden');
+  fetchTodos();
+}
+
+function checkAuth() {
+  const token = getToken();
+  if (!token) return showAuthView();
+
+  try {
+    // Decode JWT payload (no verification, server will verify on API calls)
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    if (payload.exp && payload.exp * 1000 < Date.now()) {
+      clearToken();
+      return showAuthView();
+    }
+    showAppView(payload.username);
+  } catch {
+    clearToken();
+    showAuthView();
+  }
+}
+
+// Tab switching
+document.querySelectorAll('.auth-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    const target = tab.dataset.tab;
+    document.getElementById('login-form').classList.toggle('hidden', target !== 'login');
+    document.getElementById('register-form').classList.toggle('hidden', target !== 'register');
+    document.getElementById('login-error').classList.add('hidden');
+    document.getElementById('register-error').classList.add('hidden');
+  });
+});
+
+// Login
+document.getElementById('login-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const username = document.getElementById('login-username').value.trim();
+  const password = document.getElementById('login-password').value;
+  const errEl = document.getElementById('login-error');
+  errEl.classList.add('hidden');
+
+  const res = await fetch('/api/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password })
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    errEl.textContent = data.error;
+    errEl.classList.remove('hidden');
+    return;
+  }
+  setToken(data.token);
+  showAppView(data.username);
+});
+
+// Register
+document.getElementById('register-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const username = document.getElementById('reg-username').value.trim();
+  const password = document.getElementById('reg-password').value;
+  const errEl = document.getElementById('register-error');
+  errEl.classList.add('hidden');
+
+  const res = await fetch('/api/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password })
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    errEl.textContent = data.error;
+    errEl.classList.remove('hidden');
+    return;
+  }
+  setToken(data.token);
+  showAppView(data.username);
+});
+
+// Logout
+function logout() {
+  clearToken();
+  todos = [];
+  document.getElementById('login-username').value = '';
+  document.getElementById('login-password').value = '';
+  document.getElementById('reg-username').value = '';
+  document.getElementById('reg-password').value = '';
+  showAuthView();
+}
+
+document.getElementById('logout-btn').addEventListener('click', logout);
+
+// ── Todo state ─────────────────────────────────────────────────────────────────
+
 let todos = [];
 let filter = 'all';
 
@@ -11,16 +135,18 @@ const aiModal = document.getElementById('ai-modal');
 const aiModalBody = document.getElementById('ai-modal-body');
 const aiModalClose = document.getElementById('ai-modal-close');
 
+// ── Todo API ───────────────────────────────────────────────────────────────────
+
 async function fetchTodos() {
-  const res = await fetch('/api/todos');
+  const res = await authFetch('/api/todos');
+  if (!res.ok) return;
   todos = await res.json();
   render();
 }
 
 async function addTodo(text) {
-  const res = await fetch('/api/todos', {
+  const res = await authFetch('/api/todos', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text })
   });
   if (res.ok) {
@@ -31,7 +157,7 @@ async function addTodo(text) {
 }
 
 async function toggleTodo(id) {
-  const res = await fetch(`/api/todos/${id}`, { method: 'PATCH' });
+  const res = await authFetch(`/api/todos/${id}`, { method: 'PATCH' });
   if (res.ok) {
     const updated = await res.json();
     todos = todos.map(t => t.id === id ? updated : t);
@@ -40,9 +166,8 @@ async function toggleTodo(id) {
 }
 
 async function editTodo(id, text) {
-  const res = await fetch(`/api/todos/${id}`, {
+  const res = await authFetch(`/api/todos/${id}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text })
   });
   if (res.ok) {
@@ -53,7 +178,7 @@ async function editTodo(id, text) {
 }
 
 async function deleteTodo(id) {
-  const res = await fetch(`/api/todos/${id}`, { method: 'DELETE' });
+  const res = await authFetch(`/api/todos/${id}`, { method: 'DELETE' });
   if (res.ok) {
     todos = todos.filter(t => t.id !== id);
     render();
@@ -65,7 +190,7 @@ async function getAiSuggestion() {
   aiModalBody.innerHTML = '<div class="ai-loading">Analyzing your todos...</div>';
 
   try {
-    const res = await fetch('/api/ai-suggest', { method: 'POST' });
+    const res = await authFetch('/api/ai-suggest', { method: 'POST' });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Unknown error');
     aiModalBody.innerHTML = `<div class="ai-result">${formatMarkdown(data.suggestion)}</div>`;
@@ -73,6 +198,8 @@ async function getAiSuggestion() {
     aiModalBody.innerHTML = `<div class="ai-error">Error: ${escapeHtml(e.message)}</div>`;
   }
 }
+
+// ── Render ─────────────────────────────────────────────────────────────────────
 
 function formatMarkdown(text) {
   return escapeHtml(text)
@@ -146,16 +273,14 @@ function render() {
   });
 
   emptyState.classList.toggle('hidden', visible.length > 0);
-  if (todos.length > 0) {
-    aiBtn.classList.remove('hidden');
-  } else {
-    aiBtn.classList.add('hidden');
-  }
+  aiBtn.classList.toggle('hidden', todos.length === 0);
 }
 
 function escapeHtml(str) {
   return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
+
+// ── Event listeners ────────────────────────────────────────────────────────────
 
 form.addEventListener('submit', e => {
   e.preventDefault();
@@ -176,7 +301,9 @@ aiBtn.addEventListener('click', getAiSuggestion);
 aiModalClose.addEventListener('click', () => aiModal.classList.add('hidden'));
 aiModal.addEventListener('click', e => { if (e.target === aiModal) aiModal.classList.add('hidden'); });
 
-fetchTodos();
+// ── Init ───────────────────────────────────────────────────────────────────────
+
+checkAuth();
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

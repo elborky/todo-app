@@ -8,7 +8,8 @@
       "Bash(curl -s -X PATCH http://localhost:3000/api/todos/1)",
       "Bash(curl -s -X DELETE http://localhost:3000/api/todos/2 -w \"Status: %{http_code}\")",
       "Bash(echo:*)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(JWT_SECRET=testsecret node -e \"\nprocess.env.JWT_SECRET = 'testsecret';\n// Quick syntax check\nrequire\\('./server.js'\\);\nsetTimeout\\(\\(\\) => { console.log\\('Server started OK'\\); process.exit\\(0\\); }, 500\\);\n\" 2>&1)"
     ]
   }
 }

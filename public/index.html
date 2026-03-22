@@ -18,11 +18,58 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="container">
+
+  <!-- Auth view -->
+  <div id="auth-view" class="container hidden">
+    <header>
+      <h1>My Todos</h1>
+      <p class="subtitle">Sign in to manage your tasks</p>
+    </header>
+
+    <div class="auth-tabs">
+      <button class="auth-tab active" data-tab="login">Login</button>
+      <button class="auth-tab" data-tab="register">Register</button>
+    </div>
+
+    <form id="login-form" class="auth-form">
+      <div class="form-group">
+        <label for="login-username">Username</label>
+        <input type="text" id="login-username" placeholder="Enter username" autocomplete="username" required>
+      </div>
+      <div class="form-group">
+        <label for="login-password">Password</label>
+        <input type="password" id="login-password" placeholder="Enter password" autocomplete="current-password" required>
+      </div>
+      <p id="login-error" class="auth-error hidden"></p>
+      <button type="submit" class="auth-submit">Login</button>
+    </form>
+
+    <form id="register-form" class="auth-form hidden">
+      <div class="form-group">
+        <label for="reg-username">Username</label>
+        <input type="text" id="reg-username" placeholder="Choose a username" autocomplete="username" required>
+      </div>
+      <div class="form-group">
+        <label for="reg-password">Password</label>
+        <input type="password" id="reg-password" placeholder="At least 6 characters" autocomplete="new-password" required>
+      </div>
+      <p id="register-error" class="auth-error hidden"></p>
+      <button type="submit" class="auth-submit">Create Account</button>
+    </form>
+  </div>
+
+  <!-- App view -->
+  <div id="app-view" class="container hidden">
     <header>
       <div class="header-top">
         <h1>My Todos</h1>
-        <button id="ai-suggest-btn" class="ai-btn hidden" title="Get AI priority suggestions">✨ AI Suggest</button>
+        <div class="header-actions">
+          <button id="ai-suggest-btn" class="ai-btn hidden" title="Get AI priority suggestions">✨ AI Suggest</button>
+          <div class="user-info">
+            <span id="username-display"></span>
+            <button id="logout-btn" class="logout-btn" title="Logout">Logout</button>
+          </div>
+        </div>
       </div>
       <p class="subtitle" id="count">0 tasks</p>
     </header>
